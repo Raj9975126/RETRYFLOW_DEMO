@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RetryFlow - Live Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 40px 20px;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 2.8rem;
+      color: #fff;
+      margin-bottom: 8px;
+      letter-spacing: -1px;
+    }
+    .header h1 span { color: #ffd700; }
+    .header p {
+      color: rgba(255,255,255,0.85);
+      font-size: 1.1rem;
+      max-width: 600px;
+      margin: 0 auto 16px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      margin: 4px;
+    }
+
+    /* Install box */
+    .install-section {
+      background: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 12px;
+      max-width: 500px;
+      margin: -20px auto 0;
+      padding: 16px 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .install-section code {
+      background: #0d0d1a;
+      color: #ffd700;
+      padding: 10px 16px;
+      border-radius: 8px;
+      display: block;
+      font-size: 1rem;
+      text-align: center;
+    }
+
+    /* Main */
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 30px 20px;
+    }
+
+    /* Demo cards */
+    .demo-card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+      transition: border-color 0.3s;
+    }
+    .demo-card:hover { border-color: #667eea; }
+    .demo-card h2 {
+      font-size: 1.3rem;
+      color: #667eea;
+      margin-bottom: 6px;
+    }
+    .demo-card .desc {
+      color: #999;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+    }
+
+    /* Controls row */
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      margin-bottom: 16px;
+    }
+    .control-group label {
+      display: block;
+      font-size: 0.75rem;
+      color: #888;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .control-group select,
+    .control-group input {
+      background: #0d0d1a;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      width: 120px;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 24px;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(102,126,234,0.4); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-danger {
+      background: linear-gradient(135deg, #e74c3c, #c0392b);
+      color: #fff;
+    }
+    .btn-warning {
+      background: linear-gradient(135deg, #f39c12, #e67e22);
+      color: #fff;
+    }
+
+    /* Output */
+    .output {
+      background: #0d0d1a;
+      border: 1px solid #222;
+      border-radius: 12px;
+      padding: 20px;
+      min-height: 80px;
+      font-family: 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      position: relative;
+      overflow: hidden;
+    }
+    .output.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #555;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    /* Log entries */
+    .log-entry {
+      padding: 8px 12px;
+      margin: 4px 0;
+      border-radius: 8px;
+      animation: slideIn 0.3s ease-out;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .log-entry.trying { background: rgba(52, 152, 219, 0.15); border-left: 3px solid #3498db; }
+    .log-entry.failed { background: rgba(231, 76, 60, 0.15); border-left: 3px solid #e74c3c; }
+    .log-entry.success { background: rgba(46, 204, 113, 0.15); border-left: 3px solid #2ecc71; }
+    .log-entry.timeout { background: rgba(243, 156, 18, 0.15); border-left: 3px solid #f39c12; }
+    .log-entry.delay { background: rgba(155, 89, 182, 0.12); border-left: 3px solid #9b59b6; }
+    .log-entry.info { background: rgba(102, 126, 234, 0.1); border-left: 3px solid #667eea; }
+
+    .log-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+    .log-text { flex: 1; }
+    .log-text strong { color: #fff; }
+    .log-attempt { color: #888; font-size: 0.8rem; }
+
+    /* Result banner */
+    .result-banner {
+      margin-top: 12px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-align: center;
+      animation: slideIn 0.4s ease-out;
+    }
+    .result-banner.success { background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); }
+    .result-banner.error { background: rgba(231, 76, 60, 0.2); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.3); }
+
+    /* Backoff chart */
+    .backoff-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      height: 200px;
+      padding: 16px 0;
+    }
+    .bar-group {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
+    }
+    .bar {
+      width: 100%;
+      max-width: 60px;
+      background: linear-gradient(to top, #667eea, #764ba2);
+      border-radius: 6px 6px 0 0;
+      transition: height 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+      position: relative;
+      min-height: 4px;
+    }
+    .bar-label {
+      font-size: 0.75rem;
+      color: #888;
+      margin-top: 8px;
+    }
+    .bar-value {
+      font-size: 0.7rem;
+      color: #ffd700;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Features list */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .feature {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .feature .icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .feature h3 { font-size: 0.9rem; color: #667eea; margin-bottom: 4px; }
+    .feature p { font-size: 0.8rem; color: #888; }
+
+    /* Code block */
+    .code-example {
+      background: #0d0d1a;
+      border: 1px solid #222;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 16px;
+      overflow-x: auto;
+    }
+    .code-example pre {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: #e0e0e0;
+    }
+    .code-example .keyword { color: #c678dd; }
+    .code-example .string { color: #98c379; }
+    .code-example .comment { color: #5c6370; font-style: italic; }
+    .code-example .func { color: #61afef; }
+    .code-example .number { color: #d19a66; }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 30px;
+      color: #555;
+      font-size: 0.85rem;
+      border-top: 1px solid #1a1a2e;
+      margin-top: 40px;
+    }
+    .footer a { color: #667eea; text-decoration: none; }
+
+    @media (max-width: 600px) {
+      .header h1 { font-size: 2rem; }
+      .controls { flex-direction: column; }
+      .control-group select, .control-group input { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>⚡ Retry<span>Flow</span></h1>
+    <p>A lightweight, zero-dependency retry engine for JavaScript & Node.js with exponential backoff, timeout, and cancellation.</p>
+    <span class="badge">Zero Dependencies</span>
+    <span class="badge">ESM + CJS</span>
+    <span class="badge">Node.js ≥ 18</span>
+  </div>
+
+  <!-- Install -->
+  <div class="install-section">
+    <code>npm install retryflow</code>
+  </div>
+
+  <div class="container">
+
+    <!-- Features -->
+    <div class="features">
+      <div class="feature">
+        <div class="icon">🔄</div>
+        <h3>Smart Retry</h3>
+        <p>Configurable retries with onRetry callbacks</p>
+      </div>
+      <div class="feature">
+        <div class="icon">📈</div>
+        <h3>Exponential Backoff</h3>
+        <p>Fixed or exponential delay with jitter</p>
+      </div>
+      <div class="feature">
+        <div class="icon">⏱️</div>
+        <h3>Timeout Control</h3>
+        <p>Per-attempt & overall deadline timeout</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🛑</div>
+        <h3>Cancellation</h3>
+        <p>AbortController support built-in</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🌐</div>
+        <h3>HTTP Aware</h3>
+        <p>Auto-retry on 429, 500, 502, 503, 504</p>
+      </div>
+      <div class="feature">
+        <div class="icon">📦</div>
+        <h3>Lightweight</h3>
+        <p>Zero deps, ~4KB minified</p>
+      </div>
+    </div>
+
+    <!-- Demo 1: Basic Retry -->
+    <div class="demo-card" style="margin-top: 30px;">
+      <h2>🔄 Demo 1: Basic Retry with Backoff</h2>
+      <p class="desc">Simulates a flaky function that fails a few times then succeeds. Watch RetryFlow retry with exponential backoff.</p>
+
+      <div class="controls">
+        <div class="control-group">
+          <label>Retries</label>
+          <select id="basic-retries">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="5">5</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Delay (ms)</label>
+          <select id="basic-delay">
+            <option value="200">200</option>
+            <option value="500" selected>500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Backoff</label>
+          <select id="basic-backoff">
+            <option value="exponential" selected>Exponential</option>
+            <option value="fixed">Fixed</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="runBasicRetry()">▶ Run Demo</button>
+      </div>
+
+      <div class="output empty" id="basic-output">Click "Run Demo" to see RetryFlow in action</div>
+    </div>
+
+    <!-- Demo 2: HTTP Fetch -->
+    <div class="demo-card">
+      <h2>🌐 Demo 2: HTTP Fetch with Retry</h2>
+      <p class="desc">Makes a real HTTP request to JSONPlaceholder API with retry protection.</p>
+      <button class="btn btn-primary" onclick="runHttpRetry()">▶ Fetch with Retry</button>
+      <div class="output empty" id="http-output" style="margin-top: 16px;">Click to make a real API call with RetryFlow</div>
+    </div>
+
+    <!-- Demo 3: Timeout -->
+    <div class="demo-card">
+      <h2>⏱️ Demo 3: Timeout Handling</h2>
+      <p class="desc">Demonstrates per-attempt timeout. Each attempt tries a 3-second operation with a 1-second timeout limit.</p>
+      <button class="btn btn-warning" onclick="runTimeoutDemo()">▶ Run Timeout Demo</button>
+      <div class="output empty" id="timeout-output" style="margin-top: 16px;">See how RetryFlow handles timeouts gracefully</div>
+    </div>
+
+    <!-- Demo 4: All Fail -->
+    <div class="demo-card">
+      <h2>💥 Demo 4: All Retries Exhausted</h2>
+      <p class="desc">Shows what happens when every attempt fails — RetryFlow throws a detailed RetryError.</p>
+      <button class="btn btn-danger" onclick="runAllFailDemo()">▶ Run Failure Demo</button>
+      <div class="output empty" id="fail-output" style="margin-top: 16px;">See how RetryFlow reports exhausted retries</div>
+    </div>
+
+    <!-- Demo 5: Backoff Visualizer -->
+    <div class="demo-card">
+      <h2>📊 Demo 5: Backoff Delay Visualizer</h2>
+      <p class="desc">Visualize how calculateDelay() computes retry delays with different strategies.</p>
+
+      <div class="controls">
+        <div class="control-group">
+          <label>Base Delay</label>
+          <select id="viz-delay">
+            <option value="200">200ms</option>
+            <option value="500" selected>500ms</option>
+            <option value="1000">1000ms</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Strategy</label>
+          <select id="viz-backoff">
+            <option value="exponential" selected>Exponential</option>
+            <option value="fixed">Fixed</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Factor</label>
+          <select id="viz-factor">
+            <option value="1.5">1.5x</option>
+            <option value="2" selected>2x</option>
+            <option value="3">3x</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Attempts</label>
+          <select id="viz-retries">
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="7">7</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="runBackoffViz()">📊 Visualize</button>
+      </div>
+
+      <div id="backoff-output">
+        <div class="backoff-chart" id="backoff-chart"></div>
+      </div>
+    </div>
+
+    <!-- Code Example -->
+    <div class="demo-card">
+      <h2>💻 Quick Start Code</h2>
+      <p class="desc">Get started with RetryFlow in just a few lines.</p>
+      <div class="code-example">
+        <pre><span class="keyword">import</span> { retry } <span class="keyword">from</span> <span class="string">'retryflow'</span>;
+
+<span class="comment">// Basic usage - retry a flaky API call</span>
+<span class="keyword">const</span> data = <span class="keyword">await</span> <span class="func">retry</span>(<span class="keyword">async</span> () => {
+  <span class="keyword">const</span> res = <span class="keyword">await</span> <span class="func">fetch</span>(<span class="string">'https://api.example.com/data'</span>);
+  <span class="keyword">if</span> (!res.ok) <span class="keyword">throw new</span> Error(<span class="string">`HTTP </span>${res.status}<span class="string">`</span>);
+  <span class="keyword">return</span> res.<span class="func">json</span>();
+}, {
+  retries: <span class="number">3</span>,
+  delay: <span class="number">1000</span>,
+  backoff: <span class="string">'exponential'</span>,
+  factor: <span class="number">2</span>,
+  timeout: <span class="number">5000</span>,
+  <span class="func">onRetry</span>: ({ attempt, error, delay }) => {
+    console.<span class="func">log</span>(<span class="string">`Retry #</span>${attempt}<span class="string"> in </span>${delay}<span class="string">ms: </span>${error.message}<span class="string">`</span>);
+  }
+});</pre>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p>Built with ❤️ by <strong>Rajkumar</strong> | <a href="https://github.com/Raj9975126/RETRYFLOW_DEMO" target="_blank">GitHub Repo</a></p>
+      <p style="margin-top: 8px;">RetryFlow — Making async operations resilient 💪</p>
+    </div>
+  </div>
+
+  <script>
+    // ─── Helper Functions ───
+    function getOutput(id) {
+      const el = document.getElementById(id);
+      el.classList.remove('empty');
+      el.innerHTML = '';
+      return el;
+    }
+
+    function addLog(container, { icon, text, type, detail }) {
+      const div = document.createElement('div');
+      div.className = `log-entry ${type}`;
+      div.innerHTML = `
+        <span class="log-icon">${icon}</span>
+        <span class="log-text"><strong>${text}</strong>${detail ? `<br><span class="log-attempt">${detail}</span>` : ''}</span>
+      `;
+      container.appendChild(div);
+      div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function addBanner(container, success, text) {
+      const div = document.createElement('div');
+      div.className = `result-banner ${success ? 'success' : 'error'}`;
+      div.textContent = text;
+      container.appendChild(div);
+    }
+
+    async function postDemo(endpoint, body = {}) {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return res.json();
+    }
+
+    // ─── Demo 1: Basic Retry ───
+    async function runBasicRetry() {
+      const output = getOutput('basic-output');
+      const retries = document.getElementById('basic-retries').value;
+      const delay = document.getElementById('basic-delay').value;
+      const backoff = document.getElementById('basic-backoff').value;
+
+      addLog(output, { icon: '🚀', text: `Starting retry with ${retries} retries, ${delay}ms delay, ${backoff} backoff`, type: 'info' });
+
+      const data = await postDemo('/api/demo/basic-retry', { retries, delay, backoff });
+
+      for (const log of data.logs) {
+        await new Promise(r => setTimeout(r, 200));
+        if (log.status === 'failed') {
+          addLog(output, {
+            icon: '❌', text: `Attempt ${log.attempt}: FAILED`, type: 'failed',
+            detail: `Error: ${log.error}${log.nextDelay ? ` → retrying in ${log.nextDelay}ms` : ''}`
+          });
+        } else if (log.status === 'success') {
+          addLog(output, {
+            icon: '✅', text: `Attempt ${log.attempt}: SUCCESS`, type: 'success',
+            detail: log.message
+          });
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 300));
+      if (data.success) {
+        addBanner(output, true, `✅ Succeeded after ${data.totalAttempts} attempt(s) — Result: ${JSON.stringify(data.result.data)}`);
+      } else {
+        addBanner(output, false, `❌ Failed after ${data.totalAttempts} attempt(s): ${data.error}`);
+      }
+    }
+
+    // ─── Demo 2: HTTP Retry ───
+    async function runHttpRetry() {
+      const output = getOutput('http-output');
+      addLog(output, { icon: '🌐', text: 'Making HTTP request with retry protection...', type: 'info' });
+
+      const data = await postDemo('/api/demo/http-retry');
+
+      for (const log of data.logs) {
+        await new Promise(r => setTimeout(r, 200));
+        addLog(output, {
+          icon: log.status === 'success' ? '✅' : '🔄',
+          text: `Attempt ${log.attempt}: ${log.message}`,
+          type: log.status,
+        });
+      }
+
+      await new Promise(r => setTimeout(r, 300));
+      if (data.success) {
+        addBanner(output, true, `✅ API call succeeded! Got post: "${data.result.title?.substring(0, 50)}..."`);
+      } else {
+        addBanner(output, false, `❌ Failed: ${data.error}`);
+      }
+    }
+
+    // ─── Demo 3: Timeout ───
+    async function runTimeoutDemo() {
+      const output = getOutput('timeout-output');
+      addLog(output, { icon: '⏱️', text: 'Starting operation with 1s timeout (operation takes 3s)...', type: 'info' });
+
+      const data = await postDemo('/api/demo/timeout');
+
+      for (const log of data.logs) {
+        await new Promise(r => setTimeout(r, 200));
+        const icon = log.status === 'timeout' ? '⏱️' : log.status === 'success' ? '✅' : '🔄';
+        addLog(output, {
+          icon,
+          text: `Attempt ${log.attempt}: ${log.message}`,
+          type: log.status,
+          detail: log.nextDelay ? `Retrying in ${log.nextDelay}ms...` : undefined,
+        });
+      }
+
+      await new Promise(r => setTimeout(r, 300));
+      addBanner(output, data.success, data.success
+        ? `✅ Succeeded after ${data.totalAttempts} attempt(s)`
+        : `⏱️ All ${data.totalAttempts} attempts timed out: ${data.error}`
+      );
+    }
+
+    // ─── Demo 4: All Fail ───
+    async function runAllFailDemo() {
+      const output = getOutput('fail-output');
+      addLog(output, { icon: '💥', text: 'Starting operation that always fails...', type: 'info' });
+
+      const data = await postDemo('/api/demo/all-fail');
+
+      for (const log of data.logs) {
+        await new Promise(r => setTimeout(r, 300));
+        addLog(output, {
+          icon: '❌', text: `Attempt ${log.attempt}: ${log.error}`, type: 'failed',
+          detail: log.nextDelay ? `Waiting ${log.nextDelay}ms before next retry...` : 'No more retries left',
+        });
+      }
+
+      await new Promise(r => setTimeout(r, 300));
+      addBanner(output, false, `💥 ${data.errorType}: All ${data.totalAttempts} attempts failed — "${data.error}"`);
+    }
+
+    // ─── Demo 5: Backoff Visualizer ───
+    async function runBackoffViz() {
+      const delay = document.getElementById('viz-delay').value;
+      const backoff = document.getElementById('viz-backoff').value;
+      const factor = document.getElementById('viz-factor').value;
+      const retries = document.getElementById('viz-retries').value;
+
+      const data = await postDemo('/api/demo/backoff', { delay, backoff, factor, retries });
+      const chart = document.getElementById('backoff-chart');
+      chart.innerHTML = '';
+
+      const maxDelay = Math.max(...data.delays.map(d => d.delay));
+
+      data.delays.forEach((d, i) => {
+        const group = document.createElement('div');
+        group.className = 'bar-group';
+
+        const value = document.createElement('div');
+        value.className = 'bar-value';
+        value.textContent = `${d.delay}ms`;
+
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.style.height = '0%';
+
+        const label = document.createElement('div');
+        label.className = 'bar-label';
+        label.textContent = `#${d.attempt}`;
+
+        group.appendChild(value);
+        group.appendChild(bar);
+        group.appendChild(label);
+        chart.appendChild(group);
+
+        setTimeout(() => {
+          bar.style.height = `${Math.max(5, (d.delay / maxDelay) * 100)}%`;
+        }, i * 100);
+      });
+    }
+
+    // Run visualizer on load
+    window.addEventListener('load', () => setTimeout(runBackoffViz, 500));
+  </script>
+</body>
+</html>
