@@ -239,20 +239,6 @@
       font-weight: 600;
     }
 
-    /* Spinner */
-    .spinner {
-      display: inline-block;
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-radius: 50%;
-      border-top-color: #fff;
-      animation: spin 0.8s linear infinite;
-      margin-right: 8px;
-      vertical-align: middle;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
     /* Features list */
     .features {
       display: grid;
@@ -317,7 +303,7 @@
     <h1>⚡ Retry<span>Flow</span></h1>
     <p>A lightweight, zero-dependency retry engine for JavaScript & Node.js with exponential backoff, timeout, and cancellation.</p>
     <span class="badge">Zero Dependencies</span>
-    <span class="badge">ESM + CJS</span>
+    <span class="badge">ESM + Browser Ready</span>
     <span class="badge">Node.js ≥ 18</span>
   </div>
 
@@ -500,7 +486,156 @@
   </div>
 
   <script>
-    // ─── Helper Functions ───
+    // ══════════════════════════════════════════════════════════════════════
+    // EMBEDDED RETRYFLOW ENGINE (Pure Client-Side + Universal)
+    // ══════════════════════════════════════════════════════════════════════
+    class RetryError extends Error {
+      constructor(message, { attempts, lastError, allErrors = [] } = {}) {
+        super(message);
+        this.name = 'RetryError';
+        this.attempts = attempts;
+        this.lastError = lastError;
+        this.allErrors = allErrors;
+      }
+    }
+
+    class TimeoutError extends Error {
+      constructor(message = 'Operation timed out', timeoutMs) {
+        super(message);
+        this.name = 'TimeoutError';
+        this.timeoutMs = timeoutMs;
+      }
+    }
+
+    class AbortError extends Error {
+      constructor(message = 'Operation was aborted') {
+        super(message);
+        this.name = 'AbortError';
+      }
+    }
+
+    function calculateDelay({ attempt = 1, delay = 1000, backoff = 'exponential', factor = 2, maxDelay = 30000, jitter = false } = {}) {
+      const safeAttempt = Math.max(1, attempt);
+      const baseDelay = Math.max(0, delay);
+      const safeMax = Math.max(0, maxDelay);
+      const isExponential = backoff !== 'fixed' && backoff !== false;
+      let computedDelay = isExponential ? baseDelay * Math.pow(factor, safeAttempt - 1) : baseDelay;
+      computedDelay = Math.min(computedDelay, safeMax);
+      if (jitter) {
+        computedDelay = Math.floor(Math.random() * (computedDelay + 1));
+      }
+      return Math.round(computedDelay);
+    }
+
+    function sleep(ms, signal) {
+      return new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(new AbortError('Operation was aborted'));
+        if (ms <= 0) return resolve();
+        let timer = null;
+        let onAbort = null;
+        const cleanup = () => {
+          if (timer) clearTimeout(timer);
+          if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        };
+        onAbort = () => { cleanup(); reject(new AbortError('Operation was aborted')); };
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+        timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+      });
+    }
+
+    async function withTimeout(fn, { timeout = 0, signal, attempt = 1 } = {}) {
+      if (signal?.aborted) throw new AbortError('Operation was aborted before execution');
+      if (!timeout && !signal) return await fn({ attempt });
+
+      const internalController = new AbortController();
+      let timerId = null;
+      let onAbortListener = null;
+
+      const cleanup = () => {
+        if (timerId !== null) clearTimeout(timerId);
+        if (signal && onAbortListener) signal.removeEventListener('abort', onAbortListener);
+      };
+
+      const timeoutPromise = new Promise((_, reject) => {
+        if (signal) {
+          onAbortListener = () => { cleanup(); internalController.abort(); reject(new AbortError('Operation was aborted')); };
+          signal.addEventListener('abort', onAbortListener, { once: true });
+        }
+        if (timeout > 0) {
+          timerId = setTimeout(() => {
+            cleanup();
+            internalController.abort();
+            reject(new TimeoutError(`Operation timed out after ${timeout}ms`, timeout));
+          }, timeout);
+        }
+      });
+
+      try {
+        const executionPromise = Promise.resolve().then(() => fn({ signal: internalController.signal, attempt }));
+        return await Promise.race([executionPromise, timeoutPromise]);
+      } finally {
+        cleanup();
+      }
+    }
+
+    async function retry(fn, options = {}) {
+      const {
+        retries = 3, delay = 1000, backoff = 'exponential', factor = 2, maxDelay = 30000, jitter = false,
+        timeout = 0, onRetry, retryStatusCodes = [408, 429, 500, 502, 503, 504]
+      } = options;
+
+      const maxAttempts = Math.max(0, retries) + 1;
+      const allErrors = [];
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        let result = undefined;
+        let error = null;
+        let failed = false;
+
+        try {
+          result = await withTimeout(fn, { timeout, attempt });
+        } catch (err) {
+          error = err;
+          failed = true;
+          allErrors.push(err);
+        }
+
+        let willRetry = false;
+        if (error) {
+          const status = error.status || error.statusCode || error.response?.status;
+          willRetry = typeof status === 'number' ? retryStatusCodes.includes(status) : true;
+        } else if (result && typeof result.status === 'number') {
+          willRetry = retryStatusCodes.includes(result.status);
+        }
+
+        if (!failed && !willRetry) return result;
+
+        if (willRetry && attempt < maxAttempts) {
+          const nextDelay = calculateDelay({ attempt, delay, backoff, factor, maxDelay, jitter });
+          if (typeof onRetry === 'function') {
+            onRetry({ attempt, nextAttempt: attempt + 1, error, response: result, delay: nextDelay });
+          }
+          await sleep(nextDelay);
+          continue;
+        }
+
+        if (failed) {
+          if (allErrors.length > 1) {
+            throw new RetryError(`All ${attempt} attempts failed. Last error: ${error?.message || error}`, {
+              attempts: attempt,
+              lastError: error,
+              allErrors
+            });
+          }
+          throw error;
+        }
+        return result;
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // UI HANDLERS
+    // ══════════════════════════════════════════════════════════════════════
     function getOutput(id) {
       const el = document.getElementById(id);
       el.classList.remove('empty');
@@ -526,131 +661,187 @@
       container.appendChild(div);
     }
 
-    async function postDemo(endpoint, body = {}) {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      return res.json();
-    }
-
     // ─── Demo 1: Basic Retry ───
     async function runBasicRetry() {
       const output = getOutput('basic-output');
-      const retries = document.getElementById('basic-retries').value;
-      const delay = document.getElementById('basic-delay').value;
+      const retries = parseInt(document.getElementById('basic-retries').value, 10);
+      const delay = parseInt(document.getElementById('basic-delay').value, 10);
       const backoff = document.getElementById('basic-backoff').value;
 
       addLog(output, { icon: '🚀', text: `Starting retry with ${retries} retries, ${delay}ms delay, ${backoff} backoff`, type: 'info' });
 
-      const data = await postDemo('/api/demo/basic-retry', { retries, delay, backoff });
+      let attempts = 0;
+      const failUntil = Math.min(retries, 3);
 
-      for (const log of data.logs) {
-        await new Promise(r => setTimeout(r, 200));
-        if (log.status === 'failed') {
-          addLog(output, {
-            icon: '❌', text: `Attempt ${log.attempt}: FAILED`, type: 'failed',
-            detail: `Error: ${log.error}${log.nextDelay ? ` → retrying in ${log.nextDelay}ms` : ''}`
-          });
-        } else if (log.status === 'success') {
-          addLog(output, {
-            icon: '✅', text: `Attempt ${log.attempt}: SUCCESS`, type: 'success',
-            detail: log.message
-          });
-        }
-      }
+      try {
+        const result = await retry(
+          async ({ attempt }) => {
+            attempts = attempt;
+            if (attempt <= failUntil) {
+              addLog(output, {
+                icon: '🔄',
+                text: `Attempt ${attempt}: Executing function...`,
+                type: 'trying'
+              });
+              throw new Error('Simulated server 503 error');
+            }
+            addLog(output, {
+              icon: '✅',
+              text: `Attempt ${attempt}: SUCCESS!`,
+              type: 'success',
+              detail: 'Payload resolved cleanly.'
+            });
+            return { message: 'Hello from RetryFlow! 🎉' };
+          },
+          {
+            retries,
+            delay,
+            backoff,
+            onRetry: ({ attempt, delay: nextDelay, error }) => {
+              addLog(output, {
+                icon: '❌',
+                text: `Attempt ${attempt} FAILED: ${error.message}`,
+                type: 'failed',
+                detail: `Backoff triggered → waiting ${nextDelay}ms before retry #${attempt + 1}...`
+              });
+            }
+          }
+        );
 
-      await new Promise(r => setTimeout(r, 300));
-      if (data.success) {
-        addBanner(output, true, `✅ Succeeded after ${data.totalAttempts} attempt(s) — Result: ${JSON.stringify(data.result.data)}`);
-      } else {
-        addBanner(output, false, `❌ Failed after ${data.totalAttempts} attempt(s): ${data.error}`);
+        addBanner(output, true, `✅ Succeeded after ${attempts} attempt(s) — Result: ${JSON.stringify(result)}`);
+      } catch (err) {
+        addBanner(output, false, `❌ Failed after ${attempts} attempt(s): ${err.message}`);
       }
     }
 
     // ─── Demo 2: HTTP Retry ───
     async function runHttpRetry() {
       const output = getOutput('http-output');
-      addLog(output, { icon: '🌐', text: 'Making HTTP request with retry protection...', type: 'info' });
+      addLog(output, { icon: '🌐', text: 'Making live fetch to JSONPlaceholder API protected by RetryFlow...', type: 'info' });
 
-      const data = await postDemo('/api/demo/http-retry');
+      try {
+        const data = await retry(
+          async ({ attempt }) => {
+            addLog(output, {
+              icon: '🔄',
+              text: `Attempt ${attempt}: Fetching https://jsonplaceholder.typicode.com/posts/1 ...`,
+              type: 'trying'
+            });
 
-      for (const log of data.logs) {
-        await new Promise(r => setTimeout(r, 200));
-        addLog(output, {
-          icon: log.status === 'success' ? '✅' : '🔄',
-          text: `Attempt ${log.attempt}: ${log.message}`,
-          type: log.status,
-        });
-      }
+            const res = await fetch('https://jsonplaceholder.typicode.com/posts/1');
+            if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+            return await res.json();
+          },
+          {
+            retries: 3,
+            delay: 500,
+            backoff: 'exponential',
+            onRetry: ({ attempt, delay, error }) => {
+              addLog(output, {
+                icon: '❌',
+                text: `Attempt ${attempt} error: ${error.message}`,
+                type: 'failed',
+                detail: `Retrying in ${delay}ms...`
+              });
+            }
+          }
+        );
 
-      await new Promise(r => setTimeout(r, 300));
-      if (data.success) {
-        addBanner(output, true, `✅ API call succeeded! Got post: "${data.result.title?.substring(0, 50)}..."`);
-      } else {
-        addBanner(output, false, `❌ Failed: ${data.error}`);
+        addLog(output, { icon: '✅', text: 'API call succeeded!', type: 'success' });
+        addBanner(output, true, `✅ Success! Received post title: "${data.title.substring(0, 50)}..."`);
+      } catch (err) {
+        addBanner(output, false, `❌ API request failed: ${err.message}`);
       }
     }
 
     // ─── Demo 3: Timeout ───
     async function runTimeoutDemo() {
       const output = getOutput('timeout-output');
-      addLog(output, { icon: '⏱️', text: 'Starting operation with 1s timeout (operation takes 3s)...', type: 'info' });
+      addLog(output, { icon: '⏱️', text: 'Configuring RetryFlow: 1s timeout limit on a 3s slow operation with 2 retries...', type: 'info' });
 
-      const data = await postDemo('/api/demo/timeout');
-
-      for (const log of data.logs) {
-        await new Promise(r => setTimeout(r, 200));
-        const icon = log.status === 'timeout' ? '⏱️' : log.status === 'success' ? '✅' : '🔄';
-        addLog(output, {
-          icon,
-          text: `Attempt ${log.attempt}: ${log.message}`,
-          type: log.status,
-          detail: log.nextDelay ? `Retrying in ${log.nextDelay}ms...` : undefined,
-        });
+      let count = 0;
+      try {
+        await retry(
+          async ({ attempt }) => {
+            count = attempt;
+            addLog(output, {
+              icon: '🔄',
+              text: `Attempt ${attempt}: Work started (simulating 3s workload)...`,
+              type: 'trying'
+            });
+            await new Promise(r => setTimeout(r, 3000));
+            return 'Done';
+          },
+          {
+            retries: 2,
+            timeout: 1000,
+            delay: 300,
+            onRetry: ({ attempt, delay, error }) => {
+              addLog(output, {
+                icon: '⏱️',
+                text: `Attempt ${attempt} TIMED OUT! (${error.message})`,
+                type: 'timeout',
+                detail: `Retrying in ${delay}ms...`
+              });
+            }
+          }
+        );
+      } catch (err) {
+        addBanner(output, false, `⏱️ RetryEngine aborted: All ${count} attempts exceeded 1000ms timeout! (${err.name})`);
       }
-
-      await new Promise(r => setTimeout(r, 300));
-      addBanner(output, data.success, data.success
-        ? `✅ Succeeded after ${data.totalAttempts} attempt(s)`
-        : `⏱️ All ${data.totalAttempts} attempts timed out: ${data.error}`
-      );
     }
 
     // ─── Demo 4: All Fail ───
     async function runAllFailDemo() {
       const output = getOutput('fail-output');
-      addLog(output, { icon: '💥', text: 'Starting operation that always fails...', type: 'info' });
+      addLog(output, { icon: '💥', text: 'Starting an operation that repeatedly throws "Service Unavailable"...', type: 'info' });
 
-      const data = await postDemo('/api/demo/all-fail');
-
-      for (const log of data.logs) {
-        await new Promise(r => setTimeout(r, 300));
-        addLog(output, {
-          icon: '❌', text: `Attempt ${log.attempt}: ${log.error}`, type: 'failed',
-          detail: log.nextDelay ? `Waiting ${log.nextDelay}ms before next retry...` : 'No more retries left',
-        });
+      let attempts = 0;
+      try {
+        await retry(
+          async ({ attempt }) => {
+            attempts = attempt;
+            throw new Error('503 Service Unavailable');
+          },
+          {
+            retries: 3,
+            delay: 300,
+            backoff: 'exponential',
+            onRetry: ({ attempt, delay, error }) => {
+              addLog(output, {
+                icon: '❌',
+                text: `Attempt ${attempt} FAILED: ${error.message}`,
+                type: 'failed',
+                detail: `Backoff delay: ${delay}ms before next attempt.`
+              });
+            }
+          }
+        );
+      } catch (err) {
+        addBanner(output, false, `💥 ${err.name}: All ${attempts} attempts exhausted! ${err.message}`);
       }
-
-      await new Promise(r => setTimeout(r, 300));
-      addBanner(output, false, `💥 ${data.errorType}: All ${data.totalAttempts} attempts failed — "${data.error}"`);
     }
 
     // ─── Demo 5: Backoff Visualizer ───
-    async function runBackoffViz() {
-      const delay = document.getElementById('viz-delay').value;
+    function runBackoffViz() {
+      const delay = parseInt(document.getElementById('viz-delay').value, 10);
       const backoff = document.getElementById('viz-backoff').value;
-      const factor = document.getElementById('viz-factor').value;
-      const retries = document.getElementById('viz-retries').value;
+      const factor = parseFloat(document.getElementById('viz-factor').value);
+      const retries = parseInt(document.getElementById('viz-retries').value, 10);
 
-      const data = await postDemo('/api/demo/backoff', { delay, backoff, factor, retries });
+      const delays = [];
+      for (let i = 1; i <= retries; i++) {
+        delays.push({
+          attempt: i,
+          delay: calculateDelay({ attempt: i, delay, backoff, factor })
+        });
+      }
+
       const chart = document.getElementById('backoff-chart');
       chart.innerHTML = '';
+      const maxDelay = Math.max(...delays.map(d => d.delay));
 
-      const maxDelay = Math.max(...data.delays.map(d => d.delay));
-
-      data.delays.forEach((d, i) => {
+      delays.forEach((d, i) => {
         const group = document.createElement('div');
         group.className = 'bar-group';
 
@@ -677,7 +868,6 @@
       });
     }
 
-    // Run visualizer on load
     window.addEventListener('load', () => setTimeout(runBackoffViz, 500));
   </script>
 </body>
