@@ -1,0 +1,16 @@
+{
+  "name": "retryflow-demo",
+  "version": "1.0.0",
+  "description": "Live demo of the RetryFlow NPM package - retry engine with exponential backoff",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
